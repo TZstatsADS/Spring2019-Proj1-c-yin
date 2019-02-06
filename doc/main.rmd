@@ -1,0 +1,281 @@
+---
+title: 'Demographic Prediction based on Happy Moments'
+subtitle: 'GR5243 Project 1'
+author: "Chao Yin"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+abstract: |
+  A recommender system seeks to predict the "rating" a user would give to an item based on previous records and demographic information. Reversely, can we predict what the person is like given his/her preferences or  happy moments?
+  
+  `../data/topic_dict` is a folder of topic (e.g., entertainment, exercise etc.) dictionaries, where each file contains keywords that belong to the topic. We label the happy moments with topics and build a learning model based on MLP (Multi-Layer Perceptron) trying to recognize basic features of the users.
+output:
+  html_document:
+    df_print: paged
+---
+
+### Load Libraries
+
+The [caret](http://topepo.github.io/caret/index.html) package (short for **C**lassification **A**nd **RE**gression **T**raining) is a set of functions that attempt to streamline the process for creating predictive models.
+The [tidyverse](https://www.tidyverse.org/) is an opinionated collection of R packages designed for data science. 
+
+```{r library, message=FALSE}
+library(caret)
+library(RSNNS)
+library(tidyverse)
+```
+
+### Data Pre-processing
+
+`../output/processed_moments.csv` contains all text files of happy moments and `../data/demographic.csv` is the table of demographic information of every users. We need to compare every sentence with key words from topic dictionaries, to count how many times each topic appears in one sentence, which converts the text messages to numeric vectors.
+
+```{r proc_df, echo=FALSE, message=FALSE, warning=FALSE}
+pro_mm <- read_csv('../output/processed_moments.csv')
+demo <- read_csv('../data/demographic.csv')
+proc <- inner_join(pro_mm, demo)
+proc$age <- as.character(proc$age)
+proc$age <- as.numeric(proc$age)
+proc$age <- ifelse(test=!is.na(proc$age) & proc$age<=25, 
+                   yes='<25',
+                   no=ifelse(proc$age<=30,
+                             yes='25-30',
+                             no=ifelse(proc$age<=35,
+                                       yes='30-35',
+                                       no='>35')))
+```
+
+Here we load the topic dictionaries. There are 9 topics provided by the data contributors. 
+
+```{r dict, echo=FALSE, message=FALSE}
+wrk_dict <- read.csv('../data/topic_dict/work-dict.csv', header = FALSE)
+shp_dict <- read.csv('../data/topic_dict/shopping-dict.csv', header = FALSE)
+sch_dict <- read.csv('../data/topic_dict/school-dict.csv', header = FALSE)
+pet_dict <- read.csv('../data/topic_dict/pets-dict.csv', header = FALSE)
+ppl_dict <- read.csv('../data/topic_dict/people-dict.csv', header = FALSE)
+foo_dict <- read.csv('../data/topic_dict/food-dict.csv', header = FALSE)
+fam_dict <- read.csv('../data/topic_dict/family-dict.csv', header = FALSE)
+exe_dict <- read.csv('../data/topic_dict/exercise-dict.csv', header = FALSE)
+ent_dict <- read.csv('../data/topic_dict/entertainment-dict.csv', header = FALSE)
+
+head(data.frame(work=wrk_dict[1:5,1], shopping=shp_dict[1:5,1], school=sch_dict[1:5,1],
+                pets=pet_dict[1:5,1], people=ppl_dict[1:5,1], food=foo_dict[1:5,1],
+                family=fam_dict[1:5,1], exercise=exe_dict[1:5,1],
+                entertainment=ent_dict[1:5,1]))
+
+wrk_dict <- as.list(as.character(wrk_dict$V1))
+shp_dict <- as.list(as.character(shp_dict$V1))
+sch_dict <- as.list(as.character(sch_dict$V1))
+pet_dict <- as.list(as.character(pet_dict$V1))
+ppl_dict <- as.list(as.character(ppl_dict$V1))
+foo_dict <- as.list(as.character(foo_dict$V1))
+fam_dict <- as.list(as.character(fam_dict$V1))
+exe_dict <- as.list(as.character(exe_dict$V1))
+ent_dict <- as.list(as.character(ent_dict$V1))
+
+dict_len <- data.frame(dict=c('work','shopping','school','pets','people','food','family',
+                                'exercise','entertaiment'), 
+                       length=c(length(wrk_dict),length(shp_dict),length(sch_dict),
+                                length(pet_dict),length(ppl_dict),length(foo_dict),
+                                length(fam_dict),length(exe_dict),length(ent_dict)))
+ggplot(dict_len, aes(x=dict))+
+  geom_bar(aes(y=length), stat='identity', color = 'white', fill = 'slategray3')+
+  geom_text(aes(label=length,y=length), vjust = -.5, size=3)
+text <- as.list(proc$cleaned_hm)
+```
+
+Each topic (e.g., entertainment, exercise etc.) colum means how many times a keyword of this topic appears in this sentence. The variable `topics` is the number of topics the sentence included. The barplot shows the proportion of people grouped by `topics`. It seems that 10 per cent of them didn't mention any of these topics, which suggests that the dictionary is not complete enough. 
+
+```{r proc_topic, echo=FALSE, message=FALSE}
+path <- path.expand('../output/proc.csv')
+if(file.exists(path)){
+  proc <- read.csv(path)
+}else{
+  topic_sum <- function(x, dict){
+    l <- lapply(dict, grep, x=x)
+    l <- unlist(l)
+    return(sum(l))
+  }
+  wrk_vec <- lapply(text, topic_sum, dict=wrk_dict) %>% unlist()
+  shp_vec <- lapply(text, topic_sum, dict=shp_dict) %>% unlist()
+  sch_vec <- lapply(text, topic_sum, dict=sch_dict) %>% unlist()
+  pet_vec <- lapply(text, topic_sum, dict=pet_dict) %>% unlist()
+  ppl_vec <- lapply(text, topic_sum, dict=ppl_dict) %>% unlist()
+  foo_vec <- lapply(text, topic_sum, dict=foo_dict) %>% unlist()
+  fam_vec <- lapply(text, topic_sum, dict=fam_dict) %>% unlist()
+  exe_vec <- lapply(text, topic_sum, dict=exe_dict) %>% unlist()
+  ent_vec <- lapply(text, topic_sum, dict=ent_dict) %>% unlist()
+
+  proc$work <- wrk_vec
+  proc$shopping <- shp_vec
+  proc$school <- sch_vec
+  proc$pets <- pet_vec
+  proc$people <- ppl_vec
+  proc$food <- foo_vec
+  proc$family <- fam_vec
+  proc$exercise <- exe_vec
+  proc$entertainment <- ent_vec
+  
+  proc$topics <- as.character(rowSums(proc[,17:25] != 0))
+  write_csv(proc, path)
+}
+proc[1:5,c(11,17:26)]
+```
+
+```{r topic_num, echo=FALSE}
+ggplot(data=proc, aes(x=as.character(topics)))+
+  geom_bar(aes(y=(..count..)/sum(..count..)), color = 'white', fill = 'slategray3')+
+  scale_y_continuous(labels=scales::percent)+
+  geom_text(aes(label=scales::percent((..count..)/sum(..count..)),y=(..count..)/sum(..count..)), stat= "count", vjust = -.5, size=3)+
+  ylab('Proportion')+
+  xlab('Topics Included')
+```
+
+```{r, echo=FALSE, message=FALSE}
+happy_moment <- proc[,c(3,17:26,12,14:16)]
+happy_moment$reflection_period <- as.numeric(happy_moment$reflection_period=='24h')
+happy_moment$topics <- as.numeric(happy_moment$topics)
+```
+
+### Model Training
+
+The demographic infomation contains age, gender, marital and parenthood. Considering the input information is limited, we only build models for 2 classes. 
+
+#### Parenthood
+
+Group users by `parenthood` and calculate the mean of each variable. The third line is the absolute value of difference ratio which equares $|y/n-1|\times100$. Filter the variables with ratios larger that 5 and we get `work`,`pets`, `people`,`family`,`topics`, which we select as input features. We split the dataset into training set and testing set by the label and feed the training data into a 3-layer MLP.
+
+```{r feature select1, echo=FALSE, message=FALSE}
+happy_moment_par <- happy_moment %>% 
+  filter(parenthood %in% c('y','n')) %>%
+  select(c(1:11,15))
+happy_moment_par$parenthood <- factor(happy_moment_par$parenthood, levels=c('y','n'))
+agg_par <- aggregate(x=happy_moment_par[,c(1:11)], by=list(happy_moment_par$parenthood), FUN=mean)
+agg_par[3,2:12]=abs(agg_par[1,2:12]/agg_par[2,2:12]-1)*100
+agg_par
+#happy_moment_par <- happy_moment_par %>% 
+#  select(work, pets, people, family, topics, parenthood)
+```
+
+```{r split data1, echo=FALSE, message=FALSE}
+train_idx <- createDataPartition(happy_moment_par$parenthood, p=.8, list=FALSE, times=1)
+par_train <- happy_moment_par[train_idx,]
+par_test <- happy_moment_par[-train_idx,]
+```
+
+```{r training1, echo=FALSE, message=FALSE}
+par_path = '../output/parenthood.RDS'
+if(file.exists(par_path)){
+  mlp_Fit_par <- readRDS(par_path)
+}else{
+  mlp_fitControl_par <- trainControl(method = "repeatedcv",
+                                     number = 10,
+                                     repeats = 3)
+  mlp_Grid_par <- expand.grid(layer1=10,
+                              layer2=10,
+                              layer3=10)
+  mlp_Fit_par <- caret::train(parenthood ~ ., data=par_train,
+                              method='mlpML',
+                              trControl=mlp_fitControl_par,
+                              verbose = FALSE,
+                              tuneGrid=mlp_Grid_par)
+  saveRDS(mlp_Fit_par, par_path)
+}
+mlp_pred_par <- predict(mlp_Fit_par, newdata =par_test)
+caret::confusionMatrix(data=mlp_pred_par, reference=par_test$parenthood)
+```
+
+We treat variable `gender` and `marital` the same way as `parenthood`.
+
+#### Gender
+
+```{r feature select2, echo=FALSE, message=FALSE}
+happy_moment_gen <- happy_moment %>% 
+  filter(gender %in% c('m','f')) %>%
+  select(c(1:11,13))
+happy_moment_gen$gender <- factor(happy_moment_gen$gender, levels=c('m','f'))
+agg_gen <- aggregate(x=happy_moment_gen[,c(1:11)], by=list(happy_moment_gen$gender), FUN=mean)
+agg_gen[3,2:12]=abs(agg_gen[1,2:12]/agg_gen[2,2:12]-1)*100
+agg_gen
+#appy_moment_gen <- happy_moment_gen %>% 
+#  select(work, pets, people, family, exercise, entertainment, topics, gender)
+```
+
+```{r split data2, echo=FALSE, message=FALSE}
+train_idx <- createDataPartition(happy_moment_gen$gender, p=.8, list=FALSE, times=1)
+gen_train <- happy_moment_gen[train_idx,]
+gen_test <- happy_moment_gen[-train_idx,]
+```
+
+```{r training2, echo=FALSE, message=FALSE}
+gen_path = '../output/gender.RDS'
+if(file.exists(gen_path)){
+  mlp_Fit_gen <- readRDS(gen_path)
+}else{
+  mlp_fitControl_gen <- trainControl(method = "repeatedcv",
+                                     number = 10,
+                                     repeats = 3)
+  mlp_Grid_gen <- expand.grid(layer1=10,
+                              layer2=10,
+                              layer3=10)
+  mlp_Fit_gen <- caret::train(gender ~ ., data=gen_train,
+                              method='mlpML',
+                              trControl=mlp_fitControl_gen,
+                              verbose = FALSE,
+                              tuneGrid=mlp_Grid_gen)
+  saveRDS(mlp_Fit_gen, gen_path)
+}
+mlp_pred_gen <- predict(mlp_Fit_gen, newdata =gen_test)
+caret::confusionMatrix(data=mlp_pred_gen, reference=gen_test$gender)
+```
+
+#### Marial
+
+```{r feature select3, echo=FALSE, message=FALSE}
+happy_moment_mar <- happy_moment %>% 
+  filter(marital %in% c('married','single')) %>%
+  select(c(1:11,14))
+happy_moment_mar$marital <- factor(happy_moment_mar$marital, levels=c('married','single'))
+agg_mar <- aggregate(x=happy_moment_mar[,c(1:11)], by=list(happy_moment_mar$marital), FUN=mean)
+agg_mar[3,2:12]=abs(agg_mar[1,2:12]/agg_mar[2,2:12]-1)*100
+agg_mar
+#happy_moment_mar <- happy_moment_mar %>%
+#  select(pets, people, family, entertainment, topics, marital)
+```
+
+```{r split data3, echo=FALSE, message=FALSE}
+train_idx <- createDataPartition(happy_moment_mar$marital, p=.8, list=FALSE, times=1)
+mar_train <- happy_moment_mar[train_idx,]
+mar_test <- happy_moment_mar[-train_idx,]
+```
+
+```{r training3, echo=FALSE, message=FALSE}
+mar_path = '../output/marital.RDS'
+if(file.exists(mar_path)){
+  mlp_Fit_mar <- readRDS(mar_path)
+}else{
+  mlp_fitControl_mar <- trainControl(method = "repeatedcv",
+                                     number = 10,
+                                     repeats = 3)
+  mlp_Grid_mar <- expand.grid(layer1=10,
+                              layer2=10,
+                              layer3=10)
+  mlp_Fit_mar <- caret::train(marital ~ ., data=mar_train,
+                              method='mlpML',
+                              trControl=mlp_fitControl_mar,
+                              verbose = FALSE,
+                              tuneGrid=mlp_Grid_mar)
+  saveRDS(mlp_Fit_mar, mar_path)
+}
+mlp_pred_mar <- predict(mlp_Fit_mar, newdata =mar_test)
+caret::confusionMatrix(data=mlp_pred_mar, reference=mar_test$marital)
+```
+
+#### Conclusion
+
+The prediction accuracy of these three basic feature of demographic information are below 70 per cent, which is not very ideal. From the confusion matrix we can see that the prediction is imbalanced, this may be a result of underfitting considering the label variables are roughly balanced.
+
+Underfitting can be caused by small feature space and missing information. Nearly 10 per cent users' happy moments can not match with our dictionaries and nine topics are far less than enough to describe happiness in real world.
+
+Patterns of data groups can be observed for the pre-processing and feature-extracting process.
+
+* People without child or companion speak more of pets while parents or married ones think of people and family more.
+
+* Male cares more about work and exercise while female is happy on a boarder topics including people, pets, entertainment and family.
