@@ -9,10 +9,10 @@ This is the first and only *individual* (as opposed to *team*) this semester.
 
 Term: Spring 2019
 
-+ Projec title: Lorem ipsum dolor sit amet
-+ This project is conducted by [your name]
++ Projec title: Demographic Prediction based on Happy Moments
++ This project is conducted by Chao Yin
 
-+ Project summary: [a short summary] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
++ Project summary: A recommender system seeks to predict the "rating" a user would give to an item based on previous records and demographic information. Reversely, can we predict what the person is like given his/her preferences or  happy moments?`../data/topic_dict` is a folder of topic (e.g., entertainment, exercise etc.) dictionaries, where each file contains keywords that belong to the topic. We label the happy moments with topics and build a learning model based on MLP (Multi-Layer Perceptron) trying to recognize basic features of the users.
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
 
